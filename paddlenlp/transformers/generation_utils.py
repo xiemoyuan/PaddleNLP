@@ -313,19 +313,28 @@ class GenerationMixin(object):
             position_ids = model_kwargs["position_ids"]
             model_kwargs["position_ids"] = paddle.concat(
                 [position_ids, position_ids[:, -1].unsqueeze(-1) + 1], axis=-1)
+            print('position_ids:', model_kwargs["position_ids"])
 
         # update attention_mask
         if "attention_mask" in model_kwargs:
             attention_mask = model_kwargs["attention_mask"]
+            #"""
             batch_size, nhead, seq_len, _ = attention_mask.shape
-            new_attention_mask = paddle.zeros(
+            new_attention_mask = paddle.ones(
                 [batch_size, nhead, seq_len + 1, seq_len + 1],
                 attention_mask.dtype)
             new_attention_mask[:, :, :seq_len, :seq_len] = attention_mask
             new_attention_mask[:, :, -1, :] = new_attention_mask[:, :, -2, :]
             # TODO
-            new_attention_mask[:, :, -1, -1] = 0
+            new_attention_mask[:, :, -1, -1] = 0.0
             model_kwargs["attention_mask"] = new_attention_mask
+            #"""
+            """
+            attention_mask = nn.Pad2D([0,0,0,1], mode='replicate')(attention_mask)
+            attention_mask = nn.Pad2D([0,1,0,0], value=-1e9)(attention_mask)
+            model_kwargs["attention_mask"] = attention_mask
+            #"""
+        print('after: position_ids:', model_kwargs["position_ids"])
 
         return model_kwargs
 
@@ -549,10 +558,14 @@ class GenerationMixin(object):
             # prepare model inputs & get model output
             model_inputs = self.prepare_inputs_for_generation(input_ids,
                                                               **model_kwargs)
-            print('input_ids:', model_inputs['input_ids'].shape)
-            print(model_inputs['token_type_ids'].shape)
-            print(model_inputs['position_ids'].shape)
-            print(model_inputs['attention_mask'].shape)
+            #"""
+            if cur_len > 267:
+                print('input_ids:', model_inputs['input_ids'])
+                print(model_inputs['token_type_ids'])
+                print(model_inputs['position_ids'])
+                print(model_inputs['attention_mask'].shape)
+                break
+            #"""
             outputs = self(**model_inputs)
 
             # [batch_size, vocab_size]
@@ -573,7 +586,7 @@ class GenerationMixin(object):
             if top_p is not None and top_p < 1.0:
                 probs = TopPProcess(probs, top_p, min_tokens_to_keep)
             next_token_ids = paddle.multinomial(probs)
-            print('id(next_token_ids):', id(next_token_ids))
+            #_, next_token_ids = paddle.topk(probs, 1)
             next_token_scores = paddle.index_sample(origin_probs,
                                                     next_token_ids)
 
@@ -587,23 +600,30 @@ class GenerationMixin(object):
 
             scores = (scores * cur_len + next_token_scores) / (cur_len + 1)
 
-            print('next_token_ids: ', next_token_ids != eos_token_id)
-            print('unfinished_flag: ', unfinished_flag)
             cur_len += 1
             input_ids = paddle.concat([input_ids, next_token_ids], axis=1)
-            print('before: ', pred_ids)
             if pred_ids is None:
                 pred_ids = next_token_ids
             else:
                 pred_ids = paddle.concat([pred_ids, next_token_ids], axis=1)
-            print('pred_ids: ', pred_ids)
 
             # Stop when there is a </s> in all sentences
             if paddle.max(unfinished_flag) == 0:
                 break
-
+            """
+            print('before:')
+            #print('unfinished_flag: ', unfinished_flag)
+            #print('scores: ', scores)
+            print('pred_ids: ', id(pred_ids), pred_ids)
+            #"""
             model_kwargs = self.update_model_kwargs_for_generation(outputs,
                                                                    model_kwargs)
+            """
+            print('\nafter:')
+            #print('unfinished_flag: ', unfinished_flag)
+            #print('scores: ', scores)
+            print('pred_ids: ', id(pred_ids), pred_ids)
+            #"""
         return pred_ids, scores
 
     def beam_search(self, input_ids, beam_scorer, logits_processors, max_length,

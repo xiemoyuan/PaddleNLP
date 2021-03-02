@@ -2,6 +2,7 @@ import os
 import time
 import math
 import numpy as np
+import random
 import paddle
 import paddle.nn as nn
 import paddle.nn.functional as F
@@ -21,7 +22,6 @@ def load_ckpt(init_from_ckpt, model):
 
 def main(args):
     paddle.set_device('gpu' if args.n_gpus else 'cpu')
-    paddle.seed(args.seed)
 
     model = UnifiedTransformerLMHeadModel.from_pretrained(
         args.model_name_or_path)
@@ -40,6 +40,9 @@ def main(args):
     if args.init_from_ckpt:
         load_ckpt(args.init_from_ckpt, model)
 
+    paddle.seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
     infer(model, test_dataloader, tokenizer)
 
 
